@@ -3,8 +3,8 @@ DEP XXXX: Rejuvenate form media
 ======================
 
 :DEP: XXXX
-:Author: Matthias Kestenholz, Thibaud Colas
-:Implementation Team: You? People in the `forum thread: Rejuvenating vs deprecating Form.Media <https://forum.djangoproject.com/t/rejuvenating-vs-deprecating-form-media/21285>`_
+:Author: Matthias Kestenholz
+:Implementation Team: Matthias Kestenholz
 :Shepherd: You?
 :Status: Draft
 :Type: Feature
@@ -13,6 +13,8 @@ DEP XXXX: Rejuvenate form media
 .. contents:: Table of Contents
    :depth: 3
    :local:
+
+The first draft of this DEP has been written by Thibaud Colas years ago. It has also been discussed in the `Django forum <https://forum.djangoproject.com/t/rejuvenating-vs-deprecating-form-media/21285>`__. The current version has deviated a lot but still owes its existence to this.
 
 Abstract
 ========
