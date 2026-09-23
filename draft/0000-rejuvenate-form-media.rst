@@ -190,37 +190,12 @@ Motivation
 - The proposed design also can be used with other ways of generating import maps, such as when using `django-esm <https://github.com/codingjoe/django-esm>`_ and `esimport <https://github.com/codingjoe/esimport>`_.
 
 
-
-
-
-Django has supported object-based assets in ``forms.Media`` for several years. Proper support has been added in `#29490 <https://code.djangoproject.com/ticket/29490>`_, however Django hasn't shipped any classes using this facility until recently.
-
-Django 5.2 has introduced support for `object-based JavaScript objects <https://docs.djangoproject.com/en/5.2/topics/forms/media/#script-objects>`_, making it possible to easily add script tags with arbitrary HTML attributes, for example to add ``type="module"``:
-
-.. code-block:: python
-
-    from django import forms
-
-    media = forms.Media(
-        js=[forms.Script("module.js", type="module")]
-    )
-
-``forms.Media`` can contain arbitrary object-based assets The same doesn't
-exist for stylesheets or other asset types.
-
-As an example, the third party package `django-js-asset
-<https://pypi.org/project/django-js-asset/>`_ (Disclaimer: I'm the primary
-author.) have taken advantage of object-based media for a long time, and ship
-objects which allow adding CSS, JavaScript and JSON as media assets.
-
-This section should explain why this DEP is needed. The motivation is critical for DEPs that want to add substantial new features or materially refactor existing ones. It should clearly explain why the existing solutions are inadequate to address the problem that the DEP solves. DEP submissions without sufficient motivation may be rejected outright.
-
-
 Rationale
 =========
 
-- Rejected designs: Having a single global importmap. Variant: Loading importmaps from Django apps (e.g. an ``importmap.py`` module automatically loaded at server start)
-- Tying the import map 
+- Rejected design: Having a single global importmap. Variant: Loading importmaps from Django apps (e.g. an ``importmap.py`` module automatically loaded at server start) https://github.com/betagouv/dj-importmap/blob/main/importmap/base.py
+- Tying the import map or forms generally to the request cycle.
+
 
 This section should flesh out out the specification by describing what motivated
 the specific design and why particular design decisions were made.  It
@@ -241,13 +216,7 @@ Code which directly uses the existing ``_css_lists`` and ``_js_lists`` attribute
 Reference Implementation
 ========================
 
-An experimental implementation supporting importmaps and the discussed unification of object-based media is available here:
-
-https://github.com/feincms/django-js-asset/compare/mk/importmaps
-
-It even works with relased Django versions, but it doesn't use the ``forms.Script`` class yet, that would have to be changed.
-
-
+The described implementation can already be used via `django-js-asset <https://github.com/feincms/django-js-asset>`__ today. As described above, having this functionality in core would allow everyone to start using import maps in their apps and be sure that the maps are handled, merged and rendered correctly and consistently.
 
 Here are the most fully-fledged implementations so far:
 
