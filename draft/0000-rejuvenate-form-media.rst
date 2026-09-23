@@ -185,6 +185,13 @@ Motivation
 ==========
 
 
+- Import maps enable clean shipping of ES modules in third party Django apps.
+- When several apps and/or the main project wants to use import maps, we need a common mechanism to merge those maps so that we can produce a single importmap at the top of the page and not just let the first map win.
+- The proposed design also can be used with other ways of generating import maps, such as when using `django-esm <https://github.com/codingjoe/django-esm>`_ and `esimport <https://github.com/codingjoe/esimport>`_.
+
+
+
+
 
 Django has supported object-based assets in ``forms.Media`` for several years. Proper support has been added in `#29490 <https://code.djangoproject.com/ticket/29490>`_, however Django hasn't shipped any classes using this facility until recently.
 
@@ -208,8 +215,12 @@ objects which allow adding CSS, JavaScript and JSON as media assets.
 
 This section should explain why this DEP is needed. The motivation is critical for DEPs that want to add substantial new features or materially refactor existing ones. It should clearly explain why the existing solutions are inadequate to address the problem that the DEP solves. DEP submissions without sufficient motivation may be rejected outright.
 
+
 Rationale
 =========
+
+- Rejected designs: Having a single global importmap. Variant: Loading importmaps from Django apps (e.g. an ``importmap.py`` module automatically loaded at server start)
+- Tying the import map 
 
 This section should flesh out out the specification by describing what motivated
 the specific design and why particular design decisions were made.  It
@@ -217,6 +228,7 @@ should describe alternate designs that were considered and related work.
 
 The rationale should provide evidence of consensus within the community and
 discuss important objections or concerns raised during discussion.
+
 
 Backwards Compatibility
 =======================
@@ -231,7 +243,7 @@ Reference Implementation
 
 An experimental implementation supporting importmaps and the discussed unification of object-based media is available here:
 
-https://github.com/matthiask/django-js-asset/compare/mk/importmaps
+https://github.com/feincms/django-js-asset/compare/mk/importmaps
 
 It even works with relased Django versions, but it doesn't use the ``forms.Script`` class yet, that would have to be changed.
 
