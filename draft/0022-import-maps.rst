@@ -53,53 +53,48 @@ Import map objects
 
 The new ``ImportMap`` class allows creating import map instances which hold the map itself and additional information like integrity hashes.
 
-The implementation adapted from (and proven in) `django-js-asset <https://github.com/feincms/django-js-asset>`_ follows:
+The API follows. The implementation is available in (and proven by) `django-js-asset <https://github.com/feincms/django-js-asset>`_.
 
 .. code-block:: python
 
-    import copy
-    import json
-
-    from django.core.serializers.json import DjangoJSONEncoder
-    from django.forms.widgets import MediaAsset
-    from django.utils.html import json_script
-    from django.utils.safestring import mark_safe
-
     class ImportMap(MediaAsset):
+        """
+        An import map, rendered as ``<script type="importmap">``.
+
+        ``importmap`` is a dictionary with ``imports``, ``scopes`` and
+        ``integrity`` keys as defined by the HTML standard. The data is copied.
+        Values may be lazy strings such as ``static_lazy()`` paths, they are
+        resolved when rendering.
+
+        ``attributes`` are added to the ``<script>`` element, like for
+        ``Script`` and ``Stylesheet``.
+        """
+
         element_template = '<script type="importmap"{attributes}>{path}</script>'
 
-        def __init__(self, importmap, **attributes):
-            super().__init__(copy.deepcopy(importmap), **attributes)
+        def __init__(self, importmap, **attributes): ...
 
         @property
         def path(self):
-            return mark_safe(
-                json_script(self._path)
-                .removeprefix('<script type="application/json">')
-                .removesuffix("</script>")
-            )
+            """
+            The import map serialized as JSON, escaped using ``json_script()``.
+            """
 
         def __hash__(self):
-            path_hash = hash(json.dumps(self._path, sort_keys=True, cls=DjangoJSONEncoder))
-            if self.attributes:
-                return path_hash ^ hash(frozenset(self.attributes.items()))
-            return path_hash
+            """
+            Consistent with ``MediaAsset.__eq__``, which compares the data and
+            the attributes, so that ``Media.merge`` can deduplicate import maps.
+            """
 
         def __or__(self, other):
-            if not isinstance(other, ImportMap):
-                return NotImplemented
-            a, b = self._path, other._path
-            combined = {}
-            for key in ("imports", "integrity"):
-                if key in a or key in b:
-                    combined[key] = a.get(key, {}) | b.get(key, {})
-            if "scopes" in a or "scopes" in b:
-                scopes = a.get("scopes", {}), b.get("scopes", {})
-                combined["scopes"] = {
-                    scope: scopes[0].get(scope, {}) | scopes[1].get(scope, {})
-                    for scope in scopes[0] | scopes[1]
-                }
-            return self.__class__(combined, **(self.attributes | other.attributes))
+            """
+            Return a new import map combining this import map and ``other``.
+
+            ``imports``, ``integrity`` and each scope in ``scopes`` are merged
+            like dictionaries, so entries of ``other`` replace entries of this
+            import map. Attributes are merged the same way. Neither import map
+            is modified.
+            """
 
 Import map objects are media assets like ``Script`` and ``Stylesheet``. Their
 ``path`` is the import map itself serialized as JSON, escaped by
@@ -145,6 +140,15 @@ or my adding a lazy version of ``static``. Django uses laziness often in this
 case, therefore the DEP proposes adding a ``static_lazy`` helper which can be
 used in import maps since ``DjangoJSONEncoder`` resolves lazy strings.
 
+.. code-block:: python
+
+    static_lazy = lazy(static, str)
+    """
+    Like ``static()``, but resolves the path when the returned string is used
+    instead of when calling it. Allows using static paths in ``class Media``
+    definitions and other module level code.
+    """
+
 
 Teaching ``Media`` about import maps
 ------------------------------------
@@ -169,20 +173,16 @@ after it in the HTML source.
 
 .. code-block:: python
 
-    @html_safe
     class Media:
-        ...
-
         def render_js(self, *, attrs=None):
-            js = self._js
-            importmaps = [path for path in js if isinstance(path, ImportMap)]
-            js = [path for path in js if not isinstance(path, ImportMap)]
-            if importmaps:
-                js.insert(0, reduce(operator.or_, importmaps))
-            return [
-                path.render(attrs=attrs) if isinstance(path, MediaAsset) else path.__html__()
-                for path in js
-            ]
+            """
+            Return the list of rendered ``<script>`` elements.
+
+            All ``ImportMap`` objects are merged in the order produced by
+            ``Media.merge`` (see `Merging order`_) and rendered as a single
+            import map before all other scripts. ``attrs`` are added to every
+            element, including the import map.
+            """
 
 The import map is inserted at the beginning since import maps have to appear in
 the HTML before any modules referencing entries from the import map.
