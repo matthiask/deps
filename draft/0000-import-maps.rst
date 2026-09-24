@@ -78,8 +78,11 @@ The implementation adapted from (and proven in) `django-js-asset <https://github
         def __hash__(self):
             return _canonical_hash(self._importmap)
 
+        def __bool__(self):
+            return bool(self._importmap)
+
         def render(self, *, attrs=None):
-            if self._importmap:
+            if self:
                 attributes = flatatt(attrs) if attrs else ""
                 html = json_script(self._importmap).removeprefix(
                     '<script type="application/json">'
@@ -164,28 +167,36 @@ If we use import maps and module scripts in several places, the ``forms.Media`` 
         ...
 
         def render_js(self, *, attrs=None):
-            js = self._js
             importmap = reduce(
                 operator.or_,
-                (asset for asset in js if isinstance(asset, ImportMap)),
+                (
+                    asset
+                    for js_list in self._js_lists
+                    for asset in js_list
+                    if isinstance(asset, ImportMap)
+                ),
                 ImportMap({}),
             )
             return [
-                importmap.render(attrs=attrs),
+                *([importmap.render(attrs=attrs)] if importmap else []),
                 *(
                     path.render(attrs=attrs)
                     if isinstance(path, MediaAsset)
                     else path.__html__()
-                    for path in js
+                    for path in self._js
                     if not isinstance(path, ImportMap)
                 ),
             ]
+
+Import maps are merged in the order the media objects have been added together, not in the order produced by ``Media.merge``. The topological sort doesn't guarantee that the import map of media added later also comes later, and we want the project's import map to override entries added by apps.
 
 
 Deferred functionality
 ----------------------
 
-This DEP doesn't yet propose a way to add support for ``integrity`` hashes (although the import map object itself already supports it).
+This DEP doesn't yet propose a way to add support for ``integrity`` hashes (although the import map object itself already supports it). The hashes have to be calculated from the files as they are served, and Django doesn't have any tooling for this yet (see the note on the ``integrity`` attribute in the staticfiles documentation). Once such tooling exists, both ``forms.Script`` and ``forms.ImportMap`` could use it.
+
+A template tag for rendering the import map, similar to ``{% csp_nonce_attr media %}``, has also been considered. The tag could remember that the import map has already been rendered and warn about entries added afterwards. This only helps when all media is rendered through the tag, so we're leaving it out for now.
 
 Django's CSP nonces are already supported (``{% csp_nonce_attr media %}``).
 
@@ -229,23 +240,19 @@ Reference Implementation
 
 The described implementation can already be used via `django-js-asset <https://github.com/feincms/django-js-asset>`__ today. As described above, having this functionality in core would allow everyone to start using import maps in their apps and be sure that the maps are handled, merged and rendered correctly and consistently.
 
-Here are the most fully-fledged implementations so far:
+Since a third party package cannot change ``forms.Media`` itself, django-js-asset ships a ``js_asset.Media`` subclass which merges and renders the import maps. Media which only uses ``forms.Media`` has to be wrapped using ``js_asset.Media.from_media()``. The following issues have to be resolved so that django-js-asset matches this DEP:
 
-- https://github.com/feincms/django-js-asset/
+- `#37 <https://github.com/feincms/django-js-asset/issues/37>`__: Remove ``ImportMap.update()`` and copy the data passed to ``ImportMap``.
+- `#38 <https://github.com/feincms/django-js-asset/issues/38>`__: Merge import maps in the order media objects have been added together.
+- `#39 <https://github.com/feincms/django-js-asset/issues/39>`__: Accept ``attrs=`` in ``ImportMap.render()``.
+
+Prior art:
+
 - https://github.com/rails/importmap-rails
-
-Other references:
-
-- https://github.com/dropseed/django-importmap
 - https://github.com/tonysm/importmap-laravel
-
-TODOs
-=====
-
-- Add more possible requirements
-- Review https://github.com/wsvincent/awesome-django for packages with form media-related functionality.
-- Review https://djangopackages.org/ for packages with form media-related functionality.
-- Also update https://github.com/wsvincent/awesome-django with good packages in this category
+- https://github.com/dropseed/django-importmap
+- https://github.com/betagouv/dj-importmap
+- https://github.com/codingjoe/django-esm
 
 Copyright
 =========
