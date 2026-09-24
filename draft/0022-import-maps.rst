@@ -1,8 +1,8 @@
 ======================================
-DEP XXXX: Adding import maps to Django
+DEP 0022: Adding import maps to Django
 ======================================
 
-:DEP: XXXX
+:DEP: 0022
 :Author: Matthias Kestenholz
 :Implementation Team: Matthias Kestenholz
 :Shepherd: You?
