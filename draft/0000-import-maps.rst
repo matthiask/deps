@@ -28,9 +28,10 @@ modify file names for cache busting.
 Browser support for multiple import maps is spotty at the time of writing.
 Chromium and Safari support multiple import maps since early 2025, but Firefox
 still only uses the first import map and ignores all others (see `MDN
-<https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script/type/importmap>`__). This means that when we want to use import
-maps, we have to ensure that there's only a single import map in the output or
-wait for years until we can use this feature.
+<https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script/type/importmap>`__).
+This means that when we want to use import maps, we have to ensure that there's
+only a single import map in the output or wait for years until we can use this
+feature.
 
 Django has the ``forms.Media`` mechanism for specifying CSS and JavaScript
 assets used in forms, widgets or parts of the administration interface. By
@@ -38,13 +39,13 @@ using ``forms.Media`` objects, some parts of Django know how to collect, order
 and output required assets.
 
 This DEP proposes adding support for import maps to Django and allowing to use
-import maps with ``forms.Media``. 
+import maps with ``forms.Media``.
 
 
 Specification
 =============
 
-The implementation requires several parts which are described in the following section.
+The implementation requires several parts which are described in the following sections.
 
 
 Import map objects
@@ -100,7 +101,7 @@ The implementation adapted from (and proven in) `django-js-asset <https://github
                 }
             return self.__class__(combined, **(self.attributes | other.attributes))
 
-Import map objects are media assets like ``forms.Script`` and ``forms.Stylesheet``. Their ``path`` is the import map itself serialized as JSON, escaped by ``json_script()`` so that it cannot close the ``<script>`` element. Rendering, attributes and ``render(attrs=...)`` (and therefore CSP nonces) work exactly like for the other assets. ``MediaAsset.__eq__`` already compares the dictionaries, but dictionaries aren't hashable, so ``__hash__`` hashes an order-insensitive serialization instead.
+Import map objects are media assets like ``forms.Script`` and ``forms.Stylesheet``. Their ``path`` is the import map itself serialized as JSON, escaped by ``json_script()`` so that it cannot close the ``<script>`` element. Rendering, attributes and ``render(attrs=...)`` (and therefore CSP nonces) work exactly like for the other assets. ``MediaAsset.__eq__`` already compares the dictionaries, but dictionaries aren't hashable, so ``__hash__`` hashes an order-insensitive serialization instead. As with the other assets, rendering an import map which has a ``nonce`` attribute using ``render(attrs={"nonce": ...})`` raises a ``ValueError``. When merging, attributes of the latter import map win.
 
 
 This allows us to build and render import map objects:
@@ -122,11 +123,12 @@ This allows us to build and render import map objects:
 Import map objects can also be merged together using ``map1 | map2`` (similar
 to dictionary merging). Similar to dictionaries the same key in a latter import
 map replaces values in the former. This is intentional: A project's import map
-should be able to override entries in import maps added by apps.
+should be able to override entries in import maps added by apps, as long as the
+project's media is added last.
 
-Import map objects are immutable and copy the data they are given, since they
-have to be hashable for ``Media.merge``. ``map1 |= map2`` still works and binds
-a new object to ``map1``.
+Import map objects copy the data they are given and should be treated as
+immutable, since they have to be hashable for ``Media.merge``. ``map1 |= map2``
+still works and binds a new object to ``map1``.
 
 Calling ``static()`` inside a ``class Media`` definition resolves the path at
 import time, which doesn't work well with static file storages which modify
@@ -139,7 +141,7 @@ already shipped by django-js-asset) which can be used in import maps since
 Teaching ``forms.Media`` about import maps
 ------------------------------------------
 
-Suppose a ``ModelAdmin`` instance wants to use ES modules and importmaps. We can achieve that as follows:
+Suppose a ``ModelAdmin`` class wants to use ES modules and import maps. We can achieve that as follows:
 
 .. code-block:: python
 
@@ -151,7 +153,7 @@ Suppose a ``ModelAdmin`` instance wants to use ES modules and importmaps. We can
                 forms.Script("my-module.js", type="module"),
             ]
 
-If we use import maps and module scripts in several places, the ``forms.Media`` rendering has to merge the importmaps and render the map first, before any of the module scripts because otherwise the map only affects the modules coming after it in the HTML source.
+If we use import maps and module scripts in several places, the ``forms.Media`` rendering has to merge the import maps and render the map first, before any of the module scripts because otherwise the map only affects the modules coming after it in the HTML source.
 
 .. code-block:: python
 
@@ -160,8 +162,9 @@ If we use import maps and module scripts in several places, the ``forms.Media`` 
         ...
 
         def render_js(self, *, attrs=None):
-            importmaps = [path for path in self._js if isinstance(path, ImportMap)]
-            js = [path for path in self._js if not isinstance(path, ImportMap)]
+            js = self._js
+            importmaps = [path for path in js if isinstance(path, ImportMap)]
+            js = [path for path in js if not isinstance(path, ImportMap)]
             if importmaps:
                 js.insert(0, reduce(operator.or_, importmaps))
             return [
@@ -169,17 +172,7 @@ If we use import maps and module scripts in several places, the ``forms.Media`` 
                 for path in js
             ]
 
-Import maps are merged in the order produced by ``Media.merge``, and like with dictionaries the same key in a later import map replaces the value of an earlier one. Import maps should be listed first in their ``js`` lists, as in the example above. ``Media.merge`` then keeps them in the order the media objects have been added together, so a project's import map overrides entries added by apps. See `Merging order`_ below for import maps listed after other assets.
-
-
-Deferred functionality
-----------------------
-
-This DEP doesn't yet propose a way to add support for ``integrity`` hashes (although the import map object itself already supports it). The hashes have to be calculated from the files as they are served, and Django doesn't have any tooling for this yet (see the note on the ``integrity`` attribute in the staticfiles documentation). Once such tooling exists, both ``forms.Script`` and ``forms.ImportMap`` could use it.
-
-A template tag for rendering the import map, similar to ``{% csp_nonce_attr media %}``, has also been considered. The tag could remember that the import map has already been rendered and warn about entries added afterwards. This only helps when all media is rendered through the tag, so we're leaving it out for now.
-
-Django's CSP nonces are already supported (``{% csp_nonce_attr media %}``).
+Import maps are merged in the order produced by ``Media.merge``, and like with dictionaries the same key in a later import map replaces the value of an earlier one. Import maps should be listed first in their ``js`` lists, as in the example above. ``Media.merge`` then keeps them in the order the media objects have been added together, so import maps of media added later override entries of earlier ones. See `Merging order`_ below for import maps listed after other assets.
 
 
 Merging order
@@ -201,7 +194,30 @@ Import maps are merged in the order produced by ``Media.merge``. Import maps lis
 
 ``Media.merge`` puts the project's import map before the app's import map here, so the app's entry for ``lib`` wins even though the project's media has been added later.
 
-Merging the import maps in the order of ``_js_lists`` (the list of assets of every media object which has been added together) instead would fix this. However, ``Media.__getitem__`` (``{{ media.js }}``, and ``{% csp_nonce_attr media.js %}`` in the admin) builds a new media object from the merged ``_js`` list, so it would have to copy ``_js_lists`` too, as would any other code building media objects from merged lists. Since overriding entries of other import maps shouldn't be needed often, and listing import maps first avoids the problem, this DEP doesn't propose that.
+Merging the import maps in the order of ``_js_lists`` (the list of assets of every media object which has been added together) instead would fix this. However, ``Media.__getitem__`` (``{{ media.js }}``, and ``{% csp_nonce_attr media.js %}`` in the admin) builds a new media object from the merged ``_js`` list, so it would have to copy ``_js_lists`` too, as would any other code building media objects from merged lists. Since listing import maps first avoids the problem, this DEP doesn't propose that.
+
+The admin adds ``ModelAdmin.media`` before the media of forms, widgets and inlines, so a ``ModelAdmin``'s import map cannot override entries of import maps added by widgets.
+
+
+Moving assets out of ``django.forms``
+-------------------------------------
+
+Import maps, scripts and stylesheets are useful outside of forms too, for example when rendering the assets of a page in a view. The asset classes should therefore move to a new ``django.utils.assets`` module containing ``ImportMap``, ``Media``, ``MediaAsset``, ``Script``, ``Stylesheet``, ``static`` and ``static_lazy``. ``MediaAsset`` is included since it is the base class for custom assets.
+
+The implementation of ``static()`` moves to ``django.utils.assets`` as well, and ``django.templatetags.static`` (the ``{% static %}`` template tag) uses it from there. ``static()`` checks whether ``django.contrib.staticfiles`` is installed and uses its storage if it is. This means that ``django.utils.assets`` uses the app registry, but that's how ``static()`` has always worked, and other modules in ``django.utils`` such as ``django.utils.translation`` use the app registry too.
+
+The existing import paths (``django.forms.Media``, ``django.forms.widgets.Script``, ``django.templatetags.static.static`` etc.) stay available as backwards compatibility imports. Media definitions using ``class Media`` on forms, widgets and model admins keep working as before.
+
+A fixer for `django-upgrade <https://github.com/adamchainz/django-upgrade>`__ can automatically change the import paths in projects.
+
+
+Deferred functionality
+----------------------
+
+This DEP doesn't yet propose a way to add support for ``integrity`` hashes (although the import map object itself already supports it). The hashes have to be calculated from the files as they are served, and Django doesn't have any tooling for this yet (see the note on the ``integrity`` attribute in the staticfiles documentation). Once such tooling exists, both ``forms.Script`` and ``forms.ImportMap`` could use it.
+
+A template tag for rendering the import map, similar to ``{% csp_nonce_attr media %}``, has also been considered. The tag could remember that the import map has already been rendered and warn about entries added afterwards. This only helps when all media is rendered through the tag, so we're leaving it out for now.
+
 
 
 Motivation
@@ -233,6 +249,10 @@ Backwards Compatibility
 
 If people are already using import maps in their own projects, they would have to be aware of this change. For example, users of django-esm would have to be prepared to load the import map back into Python to allow it to be merged with import maps provided by other third party apps.
 
+The asset classes moving to ``django.utils.assets`` doesn't break anything since the old import paths stay available.
+
+Since ``ImportMap`` is a ``MediaAsset``, code which treats the ``path`` of all ``MediaAsset`` instances as a URL (for example to generate preload links) will encounter JSON instead.
+
 Apart from that it is purely an addition of new features to Django. Historically, Django has taken care to not break third party apps when there's no good reason to do so, but given the arguments laid out above, a case can be made that allowing more than one app to provide and profit from import maps is a thing which should be possible if not encouraged.
 
 
@@ -241,10 +261,9 @@ Reference Implementation
 
 The described implementation can already be used via `django-js-asset <https://github.com/feincms/django-js-asset>`__ today. As described above, having this functionality in core would allow everyone to start using import maps in their apps and be sure that the maps are handled, merged and rendered correctly and consistently.
 
-Since a third party package cannot change ``forms.Media`` itself, django-js-asset ships a ``js_asset.Media`` subclass which merges and renders the import maps. Media which only uses ``forms.Media`` has to be wrapped using ``js_asset.Media.from_media()``. The following issues have to be resolved so that django-js-asset matches this DEP:
+Since a third party package cannot change ``forms.Media`` itself, django-js-asset ships a ``js_asset.Media`` subclass which merges and renders the import maps. A plain ``forms.Media`` renders import maps (including CSP nonces) where they are listed, but only ``js_asset.Media`` merges them; media which only uses ``forms.Media`` has to be wrapped using ``js_asset.Media.from_media()`` for that.
 
-- `#37 <https://github.com/feincms/django-js-asset/issues/37>`__: Copy the data passed to ``ImportMap`` and deprecate ``ImportMap.update()`` (it will be removed in the next major version of django-js-asset).
-- `#39 <https://github.com/feincms/django-js-asset/issues/39>`__: Accept ``attrs=`` in ``ImportMap.render()``. The next major version of django-js-asset goes further and makes ``ImportMap`` a ``MediaAsset``.
+django-js-asset 4.2 copies the data passed to ``ImportMap``, deprecates ``ImportMap.update()`` and accepts ``attrs=`` in ``ImportMap.render()`` (`#37 <https://github.com/feincms/django-js-asset/issues/37>`__, `#39 <https://github.com/feincms/django-js-asset/issues/39>`__). The next major version removes ``ImportMap.update()`` and makes ``ImportMap`` a ``MediaAsset``, matching this DEP.
 
 Prior art:
 
