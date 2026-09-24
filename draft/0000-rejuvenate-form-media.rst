@@ -196,15 +196,9 @@ Rationale
 =========
 
 - Rejected design: Having a single global importmap. Variant: Loading importmaps from Django apps (e.g. an ``importmap.py`` module automatically loaded at server start) https://github.com/betagouv/dj-importmap/blob/main/importmap/base.py
-- Tying the import map or forms generally to the request cycle.
+- We don't want to tye the import map or forms generally to the request cycle.
 
-
-This section should flesh out out the specification by describing what motivated
-the specific design and why particular design decisions were made.  It
-should describe alternate designs that were considered and related work.
-
-The rationale should provide evidence of consensus within the community and
-discuss important objections or concerns raised during discussion.
+The design has been discussed at Django on the Med 2026 in Pescara, Italy. There's no consensus yet, it's a first draft and doesn't solve all problems in the space, but it should help get us moving.
 
 
 Backwards Compatibility
@@ -212,7 +206,9 @@ Backwards Compatibility
 
 Code which directly uses the existing ``_css_lists`` and ``_js_lists`` attributes would have to be changed. Those attributes are not documented, and the leading underscore clearly communicates that they are an implementation detail. They are not part of the public API and we should therefore be able to remove them as discussed above without too much fanfare.
 
-- django-csp-helpers (``CSPAwareMedia``)
+If people are already using import maps in their own projects, they would have to be aware of this change. For example, users of django-esm would have to be prepared to load the import map back into Python to allow it to be merged with import maps provided by other third party apps.
+
+Apart from that it is purely an addition of new features to Django. Historically, Django has taken care to not break third party apps when there's no good reason to do so, but given the arguments laid out above, a case can be made that allowing more than one app to provide and profit from import maps is a thing which should be possible if not encouraged.
 
 
 Reference Implementation
