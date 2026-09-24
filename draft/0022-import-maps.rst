@@ -327,6 +327,16 @@ would also have to be stored as a list of lists like ``_css_lists`` and
 ``_js_lists``, so we'd have to duplicate all the code handling the combining
 and merging of those lists.
 
+Emitting a warning (similar to ``MediaOrderConflictWarning``) when the same key
+is mapped to different values has been rejected. Overriding entries is a case
+which we won't encounter often, but it is explicitly supported, and ``Media``
+cannot distinguish an intentional override by the project from two apps
+colliding by accident. The warning would therefore also fire for the supported
+case. If an app really needs a specific copy of a module, for example of
+``lit``, it can namespace the key (``my-app/lit``), use ``scopes`` which only
+apply to modules loaded from a given path prefix, or not use the import map for
+this module at all.
+
 The design has been discussed at Django on the Med 2026 in Pescara, Italy.
 There's no consensus yet, it's a first draft and doesn't solve all problems in
 the space, but it should help get us moving.
