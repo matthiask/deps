@@ -250,10 +250,13 @@ Deferred functionality
 
 This DEP doesn't yet propose a way to add support for ``integrity`` hashes
 (although the import map object itself already supports it). The hashes have to
-be calculated from the files as they are served, and Django doesn't have any
-tooling for this yet (see the note on the ``integrity`` attribute in the
-staticfiles documentation). Once such tooling exists, both ``Script`` and
-``ImportMap`` could use it.
+be calculated from the files as they are served. `DEP 0021
+<https://github.com/django/deps/pull/122>`__ proposes ``Storage.integrity()``
+for this and adds an ``integrity`` attribute when rendering media assets.
+Modules loaded through an import map don't have a ``<script>`` element of their
+own, so their hashes would have to go into the ``integrity`` section of the
+import map instead. Since ``ImportMap`` is a ``MediaAsset``, it also has to opt
+out of the ``integrity`` attribute added by DEP 0021.
 
 A template tag for rendering the import map, similar to ``{% csp_nonce_attr
 media %}``, has also been considered. The tag could remember that the import
