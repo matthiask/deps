@@ -217,6 +217,125 @@ which avoids this problem completely. It also mirrors the way import maps are
 actually used, so this seems like an acceptable trade off.
 
 
+A complete example
+------------------
+
+The following example shows how the parts work together. The project defines a
+base import map at module level, which works since paths are only resolved when
+rendering:
+
+.. code-block:: python
+
+    # myproject/assets.py
+    from django.utils.assets import ImportMap, Media, Script
+
+    project_media = Media(js=[
+        ImportMap({"lit": "vendor/lit.js"}),
+        Script("myproject/base.js", type="module"),
+    ])
+
+Two third party apps ship widgets which use ES modules. Both of them depend on
+`Lit <https://lit.dev/>`__ and ship their own copy of it:
+
+.. code-block:: python
+
+    # markdown_editor/widgets.py
+    class MarkdownEditorWidget(forms.Textarea):
+        class Media:
+            js = [
+                ImportMap({
+                    "lit": "markdown_editor/lit.js",
+                    "markdown-editor": "markdown_editor/editor.js",
+                }),
+                Script("markdown_editor/init.js", type="module"),
+            ]
+
+    # date_picker/widgets.py
+    class DatePickerWidget(forms.DateInput):
+        class Media:
+            js = [
+                ImportMap({
+                    "lit": "date_picker/lit.js",
+                    "date-picker": "date_picker/date-picker.js",
+                }),
+                Script("date_picker/init.js", type="module"),
+            ]
+
+A view uses two forms with those widgets. The media of the forms and of the
+project are added together; the project's media is added last so that its
+import map entries win:
+
+.. code-block:: python
+
+    class ArticleForm(forms.ModelForm):
+        class Meta:
+            model = Article
+            fields = ["title", "body", "publication_date"]
+            widgets = {
+                "body": MarkdownEditorWidget,
+                "publication_date": DatePickerWidget,
+            }
+
+    class CommentForm(forms.Form):
+        text = forms.CharField(widget=MarkdownEditorWidget)
+
+    def edit_article(request, pk):
+        article = get_object_or_404(Article, pk=pk)
+        form = ArticleForm(instance=article)
+        comment_form = CommentForm()
+        return render(request, "articles/edit.html", {
+            "form": form,
+            "comment_form": comment_form,
+            "media": form.media + comment_form.media + project_media,
+        })
+
+The template renders the media once in the ``<head>``, and the forms without
+their media:
+
+.. code-block:: html+django
+
+    <head>
+      {% csp_nonce_attr media %}
+    </head>
+    <body>
+      <form method="post">{% csrf_token %}{{ form }}</form>
+      <form method="post">{% csrf_token %}{{ comment_form }}</form>
+    </body>
+
+This renders a single import map before all scripts. The paths contain hashes
+when using ``ManifestStaticFilesStorage`` (shortened here):
+
+.. code-block:: html
+
+    <script type="importmap" nonce="...">{"imports": {
+      "lit": "/static/vendor/lit.1a2b.js",
+      "markdown-editor": "/static/markdown_editor/editor.3c4d.js",
+      "date-picker": "/static/date_picker/date-picker.5e6f.js"
+    }}</script>
+    <script src="/static/markdown_editor/init.7a8b.js" nonce="..." type="module"></script>
+    <script src="/static/date_picker/init.9c0d.js" nonce="..." type="module"></script>
+    <script src="/static/myproject/base.1e2f.js" nonce="..." type="module"></script>
+
+The ``MarkdownEditorWidget`` is used in both forms, but its assets are only
+included once. Only one copy of Lit is loaded, and the project decides which
+one. The JavaScript modules use the stable identifiers from the import map and
+don't have to know about hashed file names:
+
+.. code-block:: javascript
+
+    // markdown_editor/static/markdown_editor/editor.js
+    import { LitElement, html } from "lit"
+
+    export class MarkdownEditor extends LitElement {
+      // ...
+    }
+
+    // markdown_editor/static/markdown_editor/init.js
+    import { MarkdownEditor } from "markdown-editor"
+
+    customElements.define("markdown-editor", MarkdownEditor)
+
+
 Moving assets out of ``django.forms``
 -------------------------------------
 
@@ -325,7 +444,10 @@ better design. However, since import maps are only used in JavaScript, they can
 just as well be shipped through the ``js=[]`` list. An ``importmap=`` argument
 would also have to be stored as a list of lists like ``_css_lists`` and
 ``_js_lists``, so we'd have to duplicate all the code handling the combining
-and merging of those lists.
+and merging of those lists. Also, rendering only the scripts using
+``{{ media.js }}`` (as the admin's ``change_list.html`` does using
+``{% csp_nonce_attr media.js %}``) would omit the import map, and the import
+map would have to be rendered explicitly besides it.
 
 Emitting a warning (similar to ``MediaOrderConflictWarning``) when the same key
 is mapped to different values has been rejected. Overriding entries is a case
