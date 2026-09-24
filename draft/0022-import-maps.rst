@@ -61,23 +61,35 @@ The API follows. The implementation is available in (and proven by) `django-js-a
         """
         An import map, rendered as ``<script type="importmap">``.
 
-        ``importmap`` is a dictionary with ``imports``, ``scopes`` and
-        ``integrity`` keys as defined by the HTML standard. The data is copied.
-        Values may be lazy strings such as ``static_lazy()`` paths, they are
-        resolved when rendering.
+        ``imports`` maps module specifiers to paths. Paths are resolved when
+        rendering, like ``Script`` paths: Relative paths are passed through
+        ``static()``, while URLs, paths starting with ``/`` and paths relative
+        to the document (``./``, ``../``) are used as they are. Paths ending
+        with ``/`` (prefix mappings) are used as they are too, since static
+        file storages cannot resolve directories.
 
-        ``attributes`` are added to the ``<script>`` element, like for
-        ``Script`` and ``Stylesheet``.
+        ``scopes`` maps URL prefixes to additional ``imports`` which only apply
+        to modules loaded from those prefixes. The prefixes are used as they
+        are, the paths are resolved like in ``imports``.
+
+        For paths resolved through ``static()``, the ``integrity`` metadata is
+        added automatically if the static files storage supports it (see
+        `Deferred functionality`_). ``integrity`` maps URLs to integrity
+        metadata for all other modules, e.g. modules loaded from a CDN.
+
+        The data is copied. ``attributes`` are added to the ``<script>``
+        element, like for ``Script`` and ``Stylesheet``.
         """
 
         element_template = '<script type="importmap"{attributes}>{path}</script>'
 
-        def __init__(self, importmap, **attributes): ...
+        def __init__(self, imports=None, *, scopes=None, integrity=None, **attributes): ...
 
         @property
         def path(self):
             """
-            The import map serialized as JSON, escaped using ``json_script()``.
+            The import map with resolved paths serialized as JSON, escaped
+            using ``json_script()``.
             """
 
         def __hash__(self):
@@ -114,9 +126,7 @@ This allows us to build and render import map objects:
 
     def view(request, ...):
         importmap = ImportMap({
-            "imports": {
-                "my-library": static("my-app/my-library.js"),
-            },
+            "my-library": "my-app/my-library.js",
         })
         return render(request, "template.html", {
             "importmap": importmap,
@@ -133,21 +143,10 @@ still works and binds a new object to ``map1``.
 
 Calling ``static()`` inside a ``class Media`` definition resolves the path at
 import time, which doesn't work well with static file storages which modify
-file names, for example ``ManifestStaticFilesStorage``. This issue makes it
-impossible to define import maps at module level without a way to either
-resolving paths when rendering (automatically passing paths through ``static``)
-or my adding a lazy version of ``static``. Django uses laziness often in this
-case, therefore the DEP proposes adding a ``static_lazy`` helper which can be
-used in import maps since ``DjangoJSONEncoder`` resolves lazy strings.
-
-.. code-block:: python
-
-    static_lazy = lazy(static, str)
-    """
-    Like ``static()``, but resolves the path when the returned string is used
-    instead of when calling it. Allows using static paths in ``class Media``
-    definitions and other module level code.
-    """
+file names, for example ``ManifestStaticFilesStorage``. Import maps therefore
+resolve paths when rendering, exactly like ``Script`` does. This makes it
+possible to define import maps at module level without a lazy version of
+``static()``.
 
 
 Teaching ``Media`` about import maps
@@ -162,7 +161,7 @@ achieve that as follows:
     class QuestionModelAdmin(admin.ModelAdmin):
         class Media:
             js = [
-                ImportMap({"imports": ...}),
+                ImportMap({"my-library": "my-app/my-library.js"}),
                 Script("my-module.js", type="module"),
             ]
 
@@ -201,10 +200,10 @@ listed after other assets:
 
     app = Media(js=[
         Script("shared.js"),
-        ImportMap({"imports": {"lib": "/app/lib.js"}}),
+        ImportMap({"lib": "/app/lib.js"}),
     ])
     project = Media(js=[
-        ImportMap({"imports": {"lib": "/project/lib.js"}}),
+        ImportMap({"lib": "/project/lib.js"}),
         Script("project.js"),
     ])
     (app + project).render()
@@ -224,8 +223,8 @@ Moving assets out of ``django.forms``
 Import maps, scripts and stylesheets are useful outside of forms too, for
 example when rendering the assets of a page in a view. The asset classes should
 therefore move to a new ``django.utils.assets`` module containing
-``ImportMap``, ``Media``, ``Script``, ``Stylesheet``, ``static`` and
-``static_lazy``. ``MediaAsset`` is the base class for object-based assets and
+``ImportMap``, ``Media``, ``Script``, ``Stylesheet`` and ``static``.
+``MediaAsset`` is the base class for object-based assets and
 is therefore also moved.
 
 The implementation of ``static()`` moves to ``django.utils.assets`` as well,
@@ -248,15 +247,16 @@ the implementation plan.
 Deferred functionality
 ----------------------
 
-This DEP doesn't yet propose a way to add support for ``integrity`` hashes
-(although the import map object itself already supports it). The hashes have to
-be calculated from the files as they are served. `DEP 0021
-<https://github.com/django/deps/pull/122>`__ proposes ``Storage.integrity()``
-for this and adds an ``integrity`` attribute when rendering media assets.
-Modules loaded through an import map don't have a ``<script>`` element of their
-own, so their hashes would have to go into the ``integrity`` section of the
-import map instead. Since ``ImportMap`` is a ``MediaAsset``, it also has to opt
-out of the ``integrity`` attribute added by DEP 0021.
+Calculating ``integrity`` metadata automatically depends on the static files
+storage. The hashes have to be calculated from the files as they are served.
+`DEP 0021 <https://github.com/django/deps/pull/122>`__ proposes
+``Storage.integrity()`` for this and adds an ``integrity`` attribute when
+rendering media assets. Modules loaded through an import map don't have a
+``<script>`` element of their own, so ``ImportMap`` adds their hashes to the
+``integrity`` section of the import map instead when resolving paths. Since
+``ImportMap`` is a ``MediaAsset``, it also has to opt out of the ``integrity``
+attribute added by DEP 0021. Until then, ``integrity`` has to be specified
+explicitly.
 
 A template tag for rendering the import map, similar to ``{% csp_nonce_attr
 media %}``, has also been considered. The tag could remember that the import
