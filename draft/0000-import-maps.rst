@@ -60,43 +60,34 @@ The implementation adapted from (and proven in) `django-js-asset <https://github
     import json
 
     from django.core.serializers.json import DjangoJSONEncoder
-    from django.forms.utils import flatatt
-    from django.utils.html import html_safe, json_script
+    from django.forms.widgets import MediaAsset
+    from django.utils.html import json_script
     from django.utils.safestring import mark_safe
 
-    def _canonical_hash(data):
-        return hash(json.dumps(data, sort_keys=True, cls=DjangoJSONEncoder))
+    class ImportMap(MediaAsset):
+        element_template = '<script type="importmap"{attributes}>{path}</script>'
 
-    @html_safe
-    class ImportMap:
-        def __init__(self, importmap):
-            self._importmap = copy.deepcopy(importmap)
+        def __init__(self, importmap, **attributes):
+            super().__init__(copy.deepcopy(importmap), **attributes)
 
-        def __eq__(self, other):
-            return isinstance(other, ImportMap) and self._importmap == other._importmap
+        @property
+        def path(self):
+            return mark_safe(
+                json_script(self._path)
+                .removeprefix('<script type="application/json">')
+                .removesuffix("</script>")
+            )
 
         def __hash__(self):
-            return _canonical_hash(self._importmap)
-
-        def __bool__(self):
-            return bool(self._importmap)
-
-        def render(self, *, attrs=None):
-            if self:
-                attributes = flatatt(attrs) if attrs else ""
-                html = json_script(self._importmap).removeprefix(
-                    '<script type="application/json">'
-                )
-                return mark_safe(f'<script type="importmap"{attributes}>{html}')
-            return ""
-
-        def __str__(self):
-            return self.render()
+            return hash((
+                json.dumps(self._path, sort_keys=True, cls=DjangoJSONEncoder),
+                frozenset(self.attributes.items()),
+            ))
 
         def __or__(self, other):
             if not isinstance(other, ImportMap):
                 return NotImplemented
-            a, b = self._importmap, other._importmap
+            a, b = self._path, other._path
             combined = {}
             for key in ("imports", "integrity"):
                 if key in a or key in b:
@@ -107,7 +98,9 @@ The implementation adapted from (and proven in) `django-js-asset <https://github
                     scope: scopes[0].get(scope, {}) | scopes[1].get(scope, {})
                     for scope in scopes[0] | scopes[1]
                 }
-            return self.__class__(combined)
+            return self.__class__(combined, **(self.attributes | other.attributes))
+
+Import map objects are media assets like ``forms.Script`` and ``forms.Stylesheet``. Their ``path`` is the import map itself serialized as JSON, escaped by ``json_script()`` so that it cannot close the ``<script>`` element. Rendering, attributes and ``render(attrs=...)`` (and therefore CSP nonces) work exactly like for the other assets. ``MediaAsset.__eq__`` already compares the dictionaries, but dictionaries aren't hashable, so ``__hash__`` hashes an order-insensitive serialization instead.
 
 
 This allows us to build and render import map objects:
@@ -167,20 +160,13 @@ If we use import maps and module scripts in several places, the ``forms.Media`` 
         ...
 
         def render_js(self, *, attrs=None):
-            importmap = reduce(
-                operator.or_,
-                (path for path in self._js if isinstance(path, ImportMap)),
-                ImportMap({}),
-            )
+            importmaps = [path for path in self._js if isinstance(path, ImportMap)]
+            js = [path for path in self._js if not isinstance(path, ImportMap)]
+            if importmaps:
+                js.insert(0, reduce(operator.or_, importmaps))
             return [
-                *([importmap.render(attrs=attrs)] if importmap else []),
-                *(
-                    path.render(attrs=attrs)
-                    if isinstance(path, MediaAsset)
-                    else path.__html__()
-                    for path in self._js
-                    if not isinstance(path, ImportMap)
-                ),
+                path.render(attrs=attrs) if isinstance(path, MediaAsset) else path.__html__()
+                for path in js
             ]
 
 Import maps are merged in the order produced by ``Media.merge``, and like with dictionaries the same key in a later import map replaces the value of an earlier one. Import maps should be listed first in their ``js`` lists, as in the example above. ``Media.merge`` then keeps them in the order the media objects have been added together, so a project's import map overrides entries added by apps. See `Merging order`_ below for import maps listed after other assets.
@@ -258,7 +244,7 @@ The described implementation can already be used via `django-js-asset <https://g
 Since a third party package cannot change ``forms.Media`` itself, django-js-asset ships a ``js_asset.Media`` subclass which merges and renders the import maps. Media which only uses ``forms.Media`` has to be wrapped using ``js_asset.Media.from_media()``. The following issues have to be resolved so that django-js-asset matches this DEP:
 
 - `#37 <https://github.com/feincms/django-js-asset/issues/37>`__: Copy the data passed to ``ImportMap`` and deprecate ``ImportMap.update()`` (it will be removed in the next major version of django-js-asset).
-- `#39 <https://github.com/feincms/django-js-asset/issues/39>`__: Accept ``attrs=`` in ``ImportMap.render()`` and add ``ImportMap.__bool__``.
+- `#39 <https://github.com/feincms/django-js-asset/issues/39>`__: Accept ``attrs=`` in ``ImportMap.render()``. The next major version of django-js-asset goes further and makes ``ImportMap`` a ``MediaAsset``.
 
 Prior art:
 
