@@ -169,12 +169,7 @@ If we use import maps and module scripts in several places, the ``forms.Media`` 
         def render_js(self, *, attrs=None):
             importmap = reduce(
                 operator.or_,
-                (
-                    asset
-                    for js_list in self._js_lists
-                    for asset in js_list
-                    if isinstance(asset, ImportMap)
-                ),
+                (path for path in self._js if isinstance(path, ImportMap)),
                 ImportMap({}),
             )
             return [
@@ -188,7 +183,7 @@ If we use import maps and module scripts in several places, the ``forms.Media`` 
                 ),
             ]
 
-Import maps are merged in the order the media objects have been added together, not in the order produced by ``Media.merge``. The topological sort doesn't guarantee that the import map of media added later also comes later, and we want the project's import map to override entries added by apps.
+Import maps are merged in the order produced by ``Media.merge``, and like with dictionaries the same key in a later import map replaces the value of an earlier one. Import maps should be listed first in their ``js`` lists, as in the example above. ``Media.merge`` then keeps them in the order the media objects have been added together, so a project's import map overrides entries added by apps. See `Merging order`_ below for import maps listed after other assets.
 
 
 Deferred functionality
@@ -199,6 +194,28 @@ This DEP doesn't yet propose a way to add support for ``integrity`` hashes (alth
 A template tag for rendering the import map, similar to ``{% csp_nonce_attr media %}``, has also been considered. The tag could remember that the import map has already been rendered and warn about entries added afterwards. This only helps when all media is rendered through the tag, so we're leaving it out for now.
 
 Django's CSP nonces are already supported (``{% csp_nonce_attr media %}``).
+
+
+Merging order
+-------------
+
+Import maps are merged in the order produced by ``Media.merge``. Import maps listed first in their ``js`` lists have no predecessors in the dependency graph, and the topological sort outputs them in the order the media objects have been added together. The sort doesn't guarantee this for import maps listed after other assets:
+
+.. code-block:: python
+
+    app = forms.Media(js=[
+        forms.Script("shared.js"),
+        forms.ImportMap({"imports": {"lib": "/app/lib.js"}}),
+    ])
+    project = forms.Media(js=[
+        forms.ImportMap({"imports": {"lib": "/project/lib.js"}}),
+        forms.Script("project.js"),
+    ])
+    (app + project).render()
+
+``Media.merge`` puts the project's import map before the app's import map here, so the app's entry for ``lib`` wins even though the project's media has been added later.
+
+Merging the import maps in the order of ``_js_lists`` (the list of assets of every media object which has been added together) instead would fix this. However, ``Media.__getitem__`` (``{{ media.js }}``, and ``{% csp_nonce_attr media.js %}`` in the admin) builds a new media object from the merged ``_js`` list, so it would have to copy ``_js_lists`` too, as would any other code building media objects from merged lists. Since overriding entries of other import maps shouldn't be needed often, and listing import maps first avoids the problem, this DEP doesn't propose that.
 
 
 Motivation
@@ -228,8 +245,6 @@ The design has been discussed at Django on the Med 2026 in Pescara, Italy. There
 Backwards Compatibility
 =======================
 
-Code which directly uses the existing ``_css_lists`` and ``_js_lists`` attributes would have to be changed. Those attributes are not documented, and the leading underscore clearly communicates that they are an implementation detail. They are not part of the public API and we should therefore be able to remove them as discussed above without too much fanfare.
-
 If people are already using import maps in their own projects, they would have to be aware of this change. For example, users of django-esm would have to be prepared to load the import map back into Python to allow it to be merged with import maps provided by other third party apps.
 
 Apart from that it is purely an addition of new features to Django. Historically, Django has taken care to not break third party apps when there's no good reason to do so, but given the arguments laid out above, a case can be made that allowing more than one app to provide and profit from import maps is a thing which should be possible if not encouraged.
@@ -242,9 +257,8 @@ The described implementation can already be used via `django-js-asset <https://g
 
 Since a third party package cannot change ``forms.Media`` itself, django-js-asset ships a ``js_asset.Media`` subclass which merges and renders the import maps. Media which only uses ``forms.Media`` has to be wrapped using ``js_asset.Media.from_media()``. The following issues have to be resolved so that django-js-asset matches this DEP:
 
-- `#37 <https://github.com/feincms/django-js-asset/issues/37>`__: Remove ``ImportMap.update()`` and copy the data passed to ``ImportMap``.
-- `#38 <https://github.com/feincms/django-js-asset/issues/38>`__: Merge import maps in the order media objects have been added together.
-- `#39 <https://github.com/feincms/django-js-asset/issues/39>`__: Accept ``attrs=`` in ``ImportMap.render()``.
+- `#37 <https://github.com/feincms/django-js-asset/issues/37>`__: Copy the data passed to ``ImportMap`` and deprecate ``ImportMap.update()`` (it will be removed in the next major version of django-js-asset).
+- `#39 <https://github.com/feincms/django-js-asset/issues/39>`__: Accept ``attrs=`` in ``ImportMap.render()`` and add ``ImportMap.__bool__``.
 
 Prior art:
 
