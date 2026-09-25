@@ -133,10 +133,10 @@ This allows us to build and render import map objects:
             "importmap": importmap,
         })
 
-Import map objects can also be merged together using ``map1 | map2`` (similar
-to dictionary merging). Similar to dictionaries the same key in a latter import
-map replaces values in the former. This is intentional since, for example,
-overriding entries a third party app provided should be possible.
+Import map objects can be merged together using ``map1 | map2`` (similar to
+dictionary merging). The same key in a latter import map replaces values in the
+former. This is intentional since, for example, overriding entries a third
+party app provided should be possible.
 
 Import map objects copy the data they are given and should be treated as
 immutable; merging always returns a new import map, and ``map1 |= map2`` binds
@@ -161,7 +161,7 @@ achieve that as follows:
     class QuestionModelAdmin(admin.ModelAdmin):
         class Media:
             importmap = ImportMap({"my-library": "my-app/my-library.js"})
-            js = [Script("my-module.js", type="module")]
+            js = [Script("my-app/my-module.js", type="module")]
 
 Each media object holds a single import map in addition to its CSS and
 JavaScript. If a media definition needs entries from several import maps, they
@@ -215,36 +215,6 @@ Import maps are passed using the ``importmap`` argument only. When rendering an
 import map found in a ``js`` list, ``Media`` raises a ``TypeError`` pointing to
 the ``importmap`` argument, since rendering it in place would produce several
 import maps.
-
-
-Merging order
--------------
-
-Import maps are merged in the order the media objects have been added
-together, so a project's import map overrides entries of import maps added by
-apps as long as the project's media is added last.
-
-Adding the same media again merges its import map again, e.g. when a widget is
-used in two forms. Its entries then win over entries of media added in between.
-The CSS and JavaScript of such media is still only included once.
-
-The admin adds ``ModelAdmin.media`` before the media of forms, widgets and
-inlines, so an import map on a ``ModelAdmin`` cannot override entries of import
-maps added by widgets.
-
-Media rendered separately produces separate import maps, e.g. when rendering
-``{{ form.media }}`` for each form. The recommended way is to add all media
-objects together and render them once before any module scripts. If some of
-that media is rendered again later on, it doesn't matter: Its import map only
-contains specifiers which the first import map already maps. Browsers which only
-support a single import map ignore the second one, and browsers which support
-several import maps drop specifiers which are already mapped (see `MDN
-<https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script/type/importmap>`__).
-The first import map's entries win either way, even when the values differ,
-e.g. when the project overrides an app's entry. Browsers only behave
-differently for specifiers which the first import map doesn't contain, which
-happens when media is rendered without having been added to the media rendered
-first.
 
 
 A complete example
@@ -383,6 +353,93 @@ possibly a second copy of the module:
 
     customElements.define("markdown-editor", MarkdownEditor)
 
+Templates can also render the media of each form next to the form, for example
+when the HTML of forms and their scripts are loaded dynamically after the
+initial page load. The import maps still have to be merged and rendered first.
+Adding the media objects returned by ``media["importmap"]`` merges their import
+maps:
+
+.. code-block:: python
+
+    def edit_article(request, pk):
+        ...
+        return render(request, "articles/edit.html", {
+            "form": form,
+            "comment_form": comment_form,
+            "importmap": (
+                form.media["importmap"]
+                + comment_form.media["importmap"]
+                + project_media["importmap"]
+            ),
+            "project_media": project_media,
+        })
+
+.. code-block:: html+django
+
+    <head>
+      {# The nonce requires CSP to be configured. #}
+      {% csp_nonce_attr importmap %}
+
+      {# We know that the project media only contains JavaScript #}
+      {% csp_nonce_attr project_media.js %}
+    </head>
+    <body>
+      <form method="post">
+        {% csrf_token %}
+        {% csp_nonce_attr form.media.css %}
+        {% csp_nonce_attr form.media.js %}
+        {{ form }}
+      </form>
+      <form method="post">
+        {% csrf_token %}
+        {% csp_nonce_attr comment_form.media.css %}
+        {% csp_nonce_attr comment_form.media.js %}
+        {{ comment_form }}
+      </form>
+    </body>
+
+The CSS and JavaScript of ``form``'s and ``comment_form``'s media attributes
+have to be rendered separately, otherwise the import maps would be rendered
+again. This isn't a problem per se since the import map rendered in the head
+already contains all of those entries and therefore the subsequent entries are
+ignored (see `Merging order`_). It's just an aesthetic nuisance, and browsers
+may report the ignored entries in the console.
+
+Assets used by both forms are rendered once per form, though. Repeating module
+scripts such as ``markdown_editor/init.js`` is harmless, since browsers only
+evaluate a module once. Classic scripts would run twice, and stylesheets are
+included twice.
+
+
+Merging order
+-------------
+
+Import maps are merged in the order the media objects have been added
+together, so a project's import map overrides entries of import maps added by
+apps as long as the project's media is added last.
+
+Adding the same media again merges its import map again, e.g. when a widget is
+used in two forms. Its entries then win over entries of media added in between.
+The CSS and JavaScript of such media is still only included once.
+
+The admin adds ``ModelAdmin.media`` before the media of forms, widgets and
+inlines, so an import map on a ``ModelAdmin`` cannot override entries of import
+maps added by widgets.
+
+Media rendered separately produces separate import maps, e.g. when rendering
+``{{ form.media }}`` for each form. The recommended way is to add all media
+objects together and render them once before any module scripts. If some of
+that media is rendered again later on, it doesn't matter: Its import map only
+contains specifiers which the first import map already maps. Browsers which only
+support a single import map ignore the second one, and browsers which support
+several import maps drop specifiers which are already mapped (see `MDN
+<https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script/type/importmap>`__).
+The first import map's entries win either way, even when the values differ,
+e.g. when the project overrides an app's entry. Browsers only behave
+differently for specifiers which the first import map doesn't contain, which
+happens when media is rendered without having been added to the media rendered
+first.
+
 
 Moving assets out of ``django.forms``
 -------------------------------------
@@ -492,15 +549,21 @@ avoid that complexity by being explicit about managing, merging and rendering
 import maps.
 
 Shipping import maps through the ``js=[]`` list has been considered as well.
-Since import maps are only used in JavaScript, this seems natural, and
+Since import maps are most commonly used in JavaScript, this seems natural, and
 ``{{ media.js }}`` would include the import map automatically. However, the
 import maps then take part in the topological sort done by ``Media.merge``,
 which doesn't guarantee the order in which they are merged when import maps are
-listed after other assets. Also, ``ImportMap`` would have to be a
-``MediaAsset``, which ties it to changes to ``MediaAsset.render()`` which don't
-make sense for an inline script, such as the ``integrity`` attribute proposed
-by DEP 0021. A separate ``importmap`` argument holding a single import map
-avoids both problems.
+listed after other assets. Just rendering the import map alone would be
+awkward because it would have to be pulled out of the list of JavaScript
+assets. A separate ``importmap`` argument holding a single import map avoids
+both problems.
+
+Renaming ``Media`` to ``Assets`` when moving it out of ``django.forms``, as
+proposed in `ticket #22298 <https://code.djangoproject.com/ticket/22298>`__,
+has been rejected. Media definitions (``class Media``) and the ``media``
+attribute of forms, widgets and model admins keep their names, so renaming
+only the class would mix both names. Renaming everything would affect every
+form and widget definition, which goes far beyond adding import maps.
 
 Emitting a warning (similar to ``MediaOrderConflictWarning``) when the same key
 is mapped to different values has been rejected. Overriding entries is a case
