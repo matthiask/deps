@@ -44,7 +44,10 @@ interface. By using ``Media`` objects, some parts of Django know how to
 collect, order and output required assets.
 
 This DEP proposes adding support for import maps to Django and allowing to use
-import maps with ``Media``.
+import maps with ``Media``: A new ``ImportMap`` class, a single import map per
+``Media`` object which is merged when media objects are added together and
+rendered before all scripts, and moving the asset classes to a new
+``django.utils.assets`` module.
 
 
 Specification
@@ -99,7 +102,8 @@ The API follows. The implementation is available in (and proven by)
             Render the ``<script type="importmap">`` element. The import map
             with resolved paths is serialized as JSON and escaped using
             ``json_script()``. ``attrs`` are added like in
-            ``MediaAsset.render()``, e.g. for CSP nonces.
+            ``MediaAsset.render()`` (raising a ``ValueError`` for conflicting
+            attributes), e.g. for CSP nonces.
             """
 
         def __eq__(self, other):
@@ -116,15 +120,6 @@ The API follows. The implementation is available in (and proven by)
             import map. Attributes are merged the same way. Neither import map
             is modified.
             """
-
-Import maps aren't media assets like ``Script`` and ``Stylesheet``, since they
-aren't part of the ``js`` list (see `Teaching Media about import maps`_).
-Rendering using ``render(attrs=...)`` (and therefore CSP nonces) works like for
-the other assets though, including raising a ``ValueError`` when rendering an
-import map which has a ``nonce`` attribute using
-``render(attrs={"nonce": ...})``. When merging, attributes of the latter import
-map win.
-
 
 This allows us to build and render import map objects:
 
@@ -144,15 +139,14 @@ map replaces values in the former. This is intentional since, for example,
 overriding entries a third party app provided should be possible.
 
 Import map objects copy the data they are given and should be treated as
-immutable; merging always returns a new import map. ``map1 |= map2`` still
-works and binds a new object to ``map1``.
+immutable; merging always returns a new import map, and ``map1 |= map2`` binds
+a new object to ``map1``.
 
 Calling ``static()`` inside a ``class Media`` definition resolves the path at
 import time, which doesn't work well with static file storages which modify
 file names, for example ``ManifestStaticFilesStorage``. Import maps therefore
-resolve paths when rendering, like ``Script`` does. This makes it
-possible to define import maps at module level without a lazy version of
-``static()``.
+resolve paths when rendering, like ``Script`` does. This makes it possible to
+define import maps at module level.
 
 
 Teaching ``Media`` about import maps
@@ -217,9 +211,10 @@ Templates which render ``{{ media.css }}`` and ``{{ media.js }}`` separately
 have to render ``{{ media.importmap }}`` as well. The admin's
 ``change_list.html`` is updated accordingly.
 
-Import maps can't be added to ``js`` lists. ``Media`` raises a ``TypeError``
-pointing to the ``importmap`` argument when rendering one there, since
-rendering it in place would produce several import maps.
+Import maps are passed using the ``importmap`` argument only. When rendering an
+import map found in a ``js`` list, ``Media`` raises a ``TypeError`` pointing to
+the ``importmap`` argument, since rendering it in place would produce several
+import maps.
 
 
 Merging order
@@ -227,9 +222,7 @@ Merging order
 
 Import maps are merged in the order the media objects have been added
 together, so a project's import map overrides entries of import maps added by
-apps as long as the project's media is added last. Since import maps aren't
-part of the ``js`` lists, the topological sort done by ``Media.merge`` doesn't
-affect them.
+apps as long as the project's media is added last.
 
 Adding the same media again merges its import map again, e.g. when a widget is
 used in two forms. Its entries then win over entries of media added in between.
@@ -398,8 +391,8 @@ Import maps, scripts and stylesheets are useful outside of forms too, for
 example when rendering the assets of a page in a view. The asset classes should
 therefore move to a new ``django.utils.assets`` module containing
 ``ImportMap``, ``Media``, ``Script``, ``Stylesheet`` and ``static``.
-``MediaAsset`` is the base class for object-based assets and
-is therefore also moved.
+``MediaAsset`` is the base class for object-based assets and is therefore also
+moved.
 
 The implementation of ``static()`` moves to ``django.utils.assets`` as well,
 and ``django.templatetags.static`` uses it from there. ``static()`` checks
@@ -498,18 +491,16 @@ this. Django's template rendering doesn't go back anywhere in core, and we can
 avoid that complexity by being explicit about managing, merging and rendering
 import maps.
 
-Shipping import maps through the ``js=[]`` list has been considered as well,
-and earlier versions of django-js-asset implemented it. Since import maps are
-only used in JavaScript, this seems natural, and ``{{ media.js }}`` would
-include the import map automatically. However, the import maps then take part
-in the topological sort done by ``Media.merge``, which doesn't guarantee the
-order in which they are merged when import maps are listed after other assets.
-Also, ``ImportMap`` would have to be a ``MediaAsset``, which ties it to changes
-to ``MediaAsset.render()`` which don't make sense for an inline script, such as
-the ``integrity`` attribute proposed by DEP 0021. A separate ``importmap``
-argument holding a single import map avoids both problems. It doesn't need a
-list of lists like ``_css_lists`` and ``_js_lists`` either, since the import
-maps can be merged right away when adding media objects.
+Shipping import maps through the ``js=[]`` list has been considered as well.
+Since import maps are only used in JavaScript, this seems natural, and
+``{{ media.js }}`` would include the import map automatically. However, the
+import maps then take part in the topological sort done by ``Media.merge``,
+which doesn't guarantee the order in which they are merged when import maps are
+listed after other assets. Also, ``ImportMap`` would have to be a
+``MediaAsset``, which ties it to changes to ``MediaAsset.render()`` which don't
+make sense for an inline script, such as the ``integrity`` attribute proposed
+by DEP 0021. A separate ``importmap`` argument holding a single import map
+avoids both problems.
 
 Emitting a warning (similar to ``MediaOrderConflictWarning``) when the same key
 is mapped to different values has been rejected. Overriding entries is a case
@@ -563,10 +554,10 @@ Reference Implementation
 The described implementation is available in the main branch of
 `django-js-asset <https://github.com/feincms/django-js-asset>`__ and will be
 released as django-js-asset 5.0, probably after alpha or preview releases which
-are only installed when requested explicitly. As described above,
-having this functionality in core would allow everyone to start using import
-maps in their apps and be sure that the maps are handled, merged and rendered
-correctly and consistently.
+are only installed when requested explicitly. As described above, having this
+functionality in core would allow everyone to start using import maps in their
+apps and be sure that the maps are handled, merged and rendered correctly and
+consistently.
 
 Since a third party package cannot change ``Media`` itself, django-js-asset
 ships a ``js_asset.Media`` subclass which supports the ``importmap=`` argument
@@ -575,8 +566,7 @@ be wrapped using ``js_asset.Media.from_media()`` for that. Django's ``Media``
 doesn't know about ``importmap`` yet, so widgets can't use ``class Media`` for
 import maps and define ``media = js_asset.Media(importmap=..., js=[...])``
 instead. For the same reason, the admin's ``change_list.html`` has to be
-overridden to render ``{{ media.importmap }}``. Like this DEP, django-js-asset
-doesn't support import maps in ``js=[]`` lists anymore.
+overridden to render ``{{ media.importmap }}``.
 
 django-js-asset 5.0 will follow this DEP as it evolves and serve as the
 reference implementation.
