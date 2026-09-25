@@ -488,11 +488,11 @@ rendering media assets. Modules loaded through an import map don't have a
 ``<script>`` element of their own, so ``ImportMap`` adds their hashes to the
 ``integrity`` section of the import map instead when resolving paths.
 
-A template tag for rendering the import map, similar to ``{% csp_nonce_attr
-media %}``, has also been considered. The tag could remember that the import
-map has already been rendered and warn about entries added afterwards. This
-only helps when all media is rendered through the tag, so we're leaving it out
-for now.
+A template tag for rendering the import map, similar to 
+``{% csp_nonce_attr media %}``, has also been considered. The tag could
+remember that the import map has already been rendered and warn about entries
+added afterwards. This only helps when all media is rendered through the tag,
+so we're leaving it out for now.
 
 
 Motivation
