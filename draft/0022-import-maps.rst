@@ -58,7 +58,11 @@ Import map objects
 ------------------
 
 The new ``ImportMap`` class allows creating import map instances which hold the
-map itself and additional information like integrity hashes.
+map itself and additional information like integrity hashes. The import map
+format is defined by the `HTML standard
+<https://html.spec.whatwg.org/multipage/webappapis.html#import-maps>`__, `MDN
+<https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script/type/importmap>`__
+has a good introduction.
 
 The API follows. The implementation is available in (and proven by)
 `django-js-asset <https://github.com/feincms/django-js-asset>`_.
@@ -69,21 +73,20 @@ The API follows. The implementation is available in (and proven by)
         """
         An import map, rendered as ``<script type="importmap">``.
 
-        ``imports`` maps module specifiers to paths. Paths are resolved when
-        rendering, like ``Script`` paths: Relative paths are passed through
-        ``static()``, while URLs with a scheme, paths starting with ``/`` and
-        paths relative to the document (``./``, ``../``) are used as they are.
-        Paths ending with ``/`` (prefix mappings) are used as they are too,
-        since static file storages cannot resolve directories.
+        ``imports``, ``scopes`` and ``integrity`` are the parts of the import
+        map with the same names.
 
-        ``scopes`` maps URL prefixes to additional ``imports`` which only apply
-        to modules loaded from those prefixes. The prefixes are used as they
-        are, the paths are resolved like in ``imports``.
+        Paths in ``imports`` and ``scopes`` are resolved when rendering, like
+        ``Script`` paths: Relative paths are passed through ``static()``, while
+        URLs with a scheme and paths starting with ``/``, ``./`` or ``../`` are
+        used as they are. Paths ending with ``/`` are used as they are too,
+        since static file storages cannot resolve directories. Scope prefixes
+        are never resolved.
 
-        For paths resolved through ``static()``, the ``integrity`` metadata is
-        added automatically if the static files storage supports it (see
-        `Deferred functionality`_). ``integrity`` maps URLs to integrity
-        metadata for all other modules, e.g. modules loaded from a CDN.
+        For paths resolved through ``static()``, ``integrity`` metadata is added
+        automatically if the static files storage supports it (see `Deferred
+        functionality`_). ``integrity`` is only needed for other modules, e.g.
+        modules loaded from a CDN.
 
         The data is copied. ``attributes`` are added to the ``<script>``
         element, like for ``Script`` and ``Stylesheet``.
